@@ -353,7 +353,7 @@
         </style>
     </head>
     <body>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.6.0/jszip.min.js"></script>
+        <script src="https://unpkg.com/fflate/umd/index.js"></script>
 
         <div class="archive-info">
             Archive info will appear here once a archive is loaded.
@@ -482,72 +482,83 @@ function getHighestRoleColor(message) {
     return null;
 }
 
+function updateChannelInfo(jsonData) {
+    document.getElementById("channelname").textContent = "Welcome to #" + jsonData.channel.name + "!";
+    document.getElementById("channeldesc").textContent = "This is the start of the #" + jsonData.channel.name + " channel. ";
+    if (jsonData.channel.topic !== null) {
+        document.getElementById("channeldesc").textContent += jsonData.channel.topic;
+    }
+    document.getElementsByClassName("channel-name")[0].textContent = jsonData.channel.name;
+    document.getElementsByClassName("channel-topic")[0].textContent = jsonData.channel.topic || "No Channel Topic.";
+    
+    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const exportedAtTimestamp = new Date(jsonData.exportedAt);
+    const exportedAtDate = `${exportedAtTimestamp.getDate()} ${monthNames[exportedAtTimestamp.getMonth()]} ${exportedAtTimestamp.getFullYear()}`;
+    const exportedAtTime = `${String(exportedAtTimestamp.getHours()).padStart(2, '0')}:${String(exportedAtTimestamp.getMinutes()).padStart(2, '0')}`;
+    const exportedAtFormatted = `${exportedAtDate} at ${exportedAtTime}`;
+
+    const archiveInfo = document.querySelector('.archive-info');
+    archiveInfo.style.backgroundColor = "hsl(142 calc( 1 * 56.1%) 32.2% / 1)";
+    archiveInfo.textContent = `Archive of the channel ${jsonData.channel.name} in ${jsonData.guild.name} generated on ${exportedAtFormatted}.`;
+    document.title = "• Archive | #" + jsonData.channel.name;
+}
+            
+function showErrorMessage(message) {
+    const archiveInfo = document.querySelector('.archive-info');
+    archiveInfo.style.backgroundColor = "#ed4245";
+    archiveInfo.textContent = message;
+}
+            
 document.addEventListener('DOMContentLoaded', function() {
     const messageArea = document.querySelector('.message-area');
     let zip = null; // Variable to store the loaded zip file
 
     function handleFileSelect(evt) {
-        evt.stopPropagation();
-        evt.preventDefault();
+    evt.stopPropagation();
+    evt.preventDefault();
 
-        const files = evt.dataTransfer.files; // FileList object.
+    const files = evt.dataTransfer.files;
 
-        if (files.length > 0) {
-            const file = files[0];
-            const reader = new FileReader();
+    if (files.length > 0) {
+        const file = files[0];
+        const reader = new FileReader();
 
+        // Check file extension
+        const fileExtension = file.name.toLowerCase().split('.').pop();
+        
+        if (fileExtension === 'zip' || fileExtension === '7z') {
             reader.onload = function(event) {
-                const fileContent = event.target.result;
-
-                // Check if the file is a zip file
-                if (file.name.endsWith('.zip')) {
-                    JSZip.loadAsync(fileContent).then(function(loadedZip) {
-                        zip = loadedZip; // Store the loaded zip file
-
-                        // Check if messages.json exists in the zip
-                        if ('messages.json' in zip.files) {
-                            zip.files['messages.json'].async('string').then(function(content) {
-                                try {
-                                    const jsonData = JSON.parse(content);
-                                    document.getElementById("channelname").textContent = "Welcome to #" + jsonData.channel.name + "!"
-                                    document.getElementById("channeldesc").textContent = "This is the start of the #" + jsonData.channel.name + " channel. "
-                                    if (jsonData.channel.topic !== null){
-                                        document.getElementById("channeldesc").textContent += jsonData.channel.topic
-                                    }
-                                    document.getElementsByClassName("channel-name")[0].textContent = jsonData.channel.name
-                                    document.getElementsByClassName("channel-topic")[0].textContent = "No Channel Topic."
-                                    if (jsonData.channel.topic !== null){
-                                        document.getElementsByClassName("channel-topic")[0].textContent = jsonData.channel.topic
-                                    }
-                                    const monthNames = ["January", "February", "March", "April", "May", "June","July", "August", "September", "October", "November", "December"];
-                                    const exportedAtTimestamp = new Date(jsonData.exportedAt);
-                                    const exportedAtDate = `${exportedAtTimestamp.getDate()} ${monthNames[exportedAtTimestamp.getMonth()]} ${exportedAtTimestamp.getFullYear()}`;
-                                    const exportedAtTime = `${exportedAtTimestamp.getHours()}:${exportedAtTimestamp.getMinutes()}`;
-                                    const exportedAtFormatted = `${exportedAtDate} at ${exportedAtTime}`;
-
-                                    // Update the archive-info with channel information
-                                    const channelName = jsonData.channel.name;
-                                    const channelTopic = jsonData.channel.topic ? jsonData.channel.topic : "No Channel Topic.";
-                                    const archiveInfo = document.querySelector('.archive-info');
-                                    archiveInfo.textContent = `Archive of the channel ${channelName} in ${jsonData.guild.name} generated on ${exportedAtFormatted}.`;
-                                    document.title = "• Archive | #"+channelName
-                                    renderMessages(jsonData.messages);
-                                } catch (error) {
-                                    console.error('Error parsing JSON file:', error);
-                                }
-                            });
-                        } else {
-                            console.error('messages.json not found in the zip file.');
+                const fileContent = new Uint8Array(event.target.result);
+                
+                // Try to unzip the file
+                try {
+                    const unzipped = fflate.unzipSync(fileContent);
+                    
+                    // Look for messages.json in the unzipped files
+                    if ('messages.json' in unzipped) {
+                        const decoder = new TextDecoder();
+                        const jsonContent = decoder.decode(unzipped['messages.json']);
+                        try {
+                            const jsonData = JSON.parse(jsonContent);
+                            zip = unzipped; // Store unzipped data for later use
+                            updateChannelInfo(jsonData);
+                            renderMessages(jsonData.messages);
+                        } catch (error) {
+                            showErrorMessage('Error parsing JSON file: ' + error.message);
                         }
-                    });
-                } else {
-                    console.error('Invalid file format. Please provide a zip file.');
+                    } else {
+                        showErrorMessage('messages.json not found in the archive.');
+                    }
+                } catch (error) {
+                    showErrorMessage(`Error processing ${fileExtension.toUpperCase()} file: ${error.message}`);
                 }
             };
-
             reader.readAsArrayBuffer(file);
+        } else {
+            showErrorMessage("Invalid file format. Please provide a ZIP or 7z file.");
         }
     }
+}
 
     function handleDragOver(evt) {
         evt.stopPropagation();
@@ -798,26 +809,24 @@ function escapeHTML(input) {
     }
 
     // Function to set profile picture asynchronously from the zip file
-    function setProfilePicture(imgElement, avatarPath) {
-        // Check if avatarPath starts with "processing"
-        if (avatarPath.startsWith('processing')) {
-        // Find the position of the second slash
+function setProfilePicture(imgElement, avatarPath) {
+    if (avatarPath.startsWith('processing')) {
         let secondSlashIndex = avatarPath.indexOf('/', avatarPath.indexOf('/') + 1);
-        
-        // Remove text up to and including the second slash
         if (secondSlashIndex !== -1) {
             avatarPath = avatarPath.slice(secondSlashIndex + 1);
         }
-        }
-        if (zip) {
-            zip.file(avatarPath).async('blob').then(function(blob) {
-                const url = URL.createObjectURL(blob);
-                imgElement.src = url;
-            });
-        } else {
-            console.error('Zip file not loaded.');
-        }
     }
+    
+    if (zip && zip[avatarPath]) {
+        const blob = new Blob([zip[avatarPath]], { type: 'image/png' });
+        const url = URL.createObjectURL(blob);
+        imgElement.src = url;
+    } else {
+        console.error('Avatar not found:', avatarPath);
+        imgElement.src = 'default_avatar.png'; // Fallback to default avatar
+    }
+}
+
 
     // Setup the drag and drop listeners.
     const dropZone = document.body;
